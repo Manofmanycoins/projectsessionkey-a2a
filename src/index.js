@@ -23,16 +23,22 @@ function json(data, status = 200) {
   });
 }
 
-async function discoverVegetables() {
-  const response = await fetch(VEGETABLES_DISCOVERY, {
-    headers: {
-      accept: "application/json"
+async function discoverVegetables(env) {
+  const response = await env.VEGETABLES.fetch(
+    "https://vegetablewallbreaker2/.well-known/agent-card.json",
+    {
+      method: "GET",
+      headers: {
+        accept: "application/json"
+      }
     }
-  });
+  );
 
   if (!response.ok) {
+    const body = await response.text();
+
     throw new Error(
-      `Vegetables discovery failed: HTTP ${response.status}`
+      `Vegetables discovery failed: HTTP ${response.status} — ${body}`
     );
   }
 
@@ -91,14 +97,16 @@ async function sendA2AMessage(endpoint, message) {
   try {
     return JSON.parse(body);
   } catch {
-    throw new Error("Vegetables returned a non-JSON A2A response.");
+    throw new Error(
+      "Vegetables returned a non-JSON A2A response."
+    );
   }
 }
 
-async function runAgentToAgentTest() {
+async function runAgentToAgentTest(env) {
   const started = new Date().toISOString();
 
-  const discovery = await discoverVegetables();
+  const discovery = await discoverVegetables(env);
 
   const vegetablesIdentity = {
     name: discovery.card.name,
@@ -138,7 +146,7 @@ async function runAgentToAgentTest() {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
@@ -166,7 +174,7 @@ export default {
       url.pathname === "/discover"
     ) {
       try {
-        const discovery = await discoverVegetables();
+        const discovery = await discoverVegetables(env);
 
         return json({
           success: true,
@@ -190,7 +198,7 @@ export default {
       url.pathname === "/test"
     ) {
       try {
-        return json(await runAgentToAgentTest());
+        return json(await runAgentToAgentTest(env));
       } catch (error) {
         return json(
           {
