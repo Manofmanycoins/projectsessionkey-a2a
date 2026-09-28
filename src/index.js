@@ -23,6 +23,13 @@ function json(data, status = 200) {
   });
 }
 
+
+// -----------------------------------------------------
+// DISCOVERY
+// Uses Cloudflare Service Binding:
+// VEGETABLES -> vegetablewallbreaker2
+// -----------------------------------------------------
+
 async function discoverVegetables(env) {
   const response = await env.VEGETABLES.fetch(
     "https://vegetablewallbreaker2/.well-known/agent-card.json",
@@ -60,31 +67,56 @@ async function discoverVegetables(env) {
   };
 }
 
-async function sendA2AMessage(endpoint, message) {
+
+// -----------------------------------------------------
+// A2A MESSAGE
+// Uses Cloudflare Service Binding:
+// PV7 -> projectvegetables7
+// -----------------------------------------------------
+
+async function sendA2AMessage(endpoint, message, env) {
   const messageId =
     typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `sessionkey-${Date.now()}`;
 
-  const response = await fetch(`${endpoint}/message:send`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/a2a+json",
-      accept: "application/a2a+json",
-      "A2A-Version": "1.0"
-    },
-    body: JSON.stringify({
-      message: {
-        messageId,
-        role: "ROLE_USER",
-        parts: [
-          {
-            text: message
-          }
-        ]
-      }
-    })
-  });
+  /*
+   * Sessionkey MUST first discover PV7 from the Agent Card.
+   * We verify that discovery before using the Cloudflare
+   * service binding as the transport.
+   */
+
+  const expectedEndpoint =
+    "https://projectvegetables7.bigwaynesbbq.workers.dev";
+
+  if (endpoint !== expectedEndpoint) {
+    throw new Error(
+      `Unexpected A2A endpoint discovered: ${endpoint}`
+    );
+  }
+
+  const response = await env.PV7.fetch(
+    "https://projectvegetables7/message:send",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/a2a+json",
+        accept: "application/a2a+json",
+        "A2A-Version": "1.0"
+      },
+      body: JSON.stringify({
+        message: {
+          messageId,
+          role: "ROLE_USER",
+          parts: [
+            {
+              text: message
+            }
+          ]
+        }
+      })
+    }
+  );
 
   const body = await response.text();
 
@@ -103,9 +135,15 @@ async function sendA2AMessage(endpoint, message) {
   }
 }
 
+
+// -----------------------------------------------------
+// COMPLETE AGENT-TO-AGENT TEST
+// -----------------------------------------------------
+
 async function runAgentToAgentTest(env) {
   const started = new Date().toISOString();
 
+  // Step 1 — Sessionkey autonomously discovers Vegetables.
   const discovery = await discoverVegetables(env);
 
   const vegetablesIdentity = {
@@ -115,16 +153,21 @@ async function runAgentToAgentTest(env) {
     interface: discovery.endpoint
   };
 
+  // Step 2 — Sessionkey creates its own A2A message.
   const message =
     "Hello Project Vegetables. This is Project Sessionkey, " +
     "sessionkey.base.eth, ERC-8004 Agent #95962. " +
     "Identify yourself with your Basename and ERC-8004 Agent ID.";
 
+  // Step 3 — Sessionkey sends the message to the
+  // endpoint discovered from the Vegetables Agent Card.
   const response = await sendA2AMessage(
     discovery.endpoint,
-    message
+    message,
+    env
   );
 
+  // Step 4 — Return the complete machine-to-machine result.
   return {
     success: true,
     test: "Project Sessionkey -> Project Vegetables",
@@ -145,6 +188,11 @@ async function runAgentToAgentTest(env) {
   };
 }
 
+
+// -----------------------------------------------------
+// WORKER
+// -----------------------------------------------------
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -156,6 +204,8 @@ export default {
       });
     }
 
+
+    // Status
     if (request.method === "GET" && url.pathname === "/") {
       return json({
         service: "Project Sessionkey A2A Client",
@@ -164,11 +214,14 @@ export default {
         wallet: SESSIONKEY.wallet,
         purpose:
           "Autonomous discovery and A2A communication with Project Vegetables",
+        discoveryEndpoint: "/discover",
         testEndpoint: "/test",
         status: "ready"
       });
     }
 
+
+    // Discovery-only test
     if (
       request.method === "GET" &&
       url.pathname === "/discover"
@@ -179,6 +232,7 @@ export default {
         return json({
           success: true,
           discoverySource: VEGETABLES_DISCOVERY,
+          discoveredAutomatically: true,
           discoveredEndpoint: discovery.endpoint,
           agentCard: discovery.card
         });
@@ -186,6 +240,8 @@ export default {
         return json(
           {
             success: false,
+            agent: SESSIONKEY.name,
+            stage: "discovery",
             error: error.message
           },
           502
@@ -193,17 +249,22 @@ export default {
       }
     }
 
+
+    // Full Sessionkey -> Vegetables test
     if (
       request.method === "GET" &&
       url.pathname === "/test"
     ) {
       try {
-        return json(await runAgentToAgentTest(env));
+        return json(
+          await runAgentToAgentTest(env)
+        );
       } catch (error) {
         return json(
           {
             success: false,
             agent: SESSIONKEY.name,
+            stage: "agent-to-agent",
             error: error.message
           },
           502
@@ -211,10 +272,15 @@ export default {
       }
     }
 
+
     return json(
       {
         error: "Not found",
-        availableEndpoints: ["/", "/discover", "/test"]
+        availableEndpoints: [
+          "/",
+          "/discover",
+          "/test"
+        ]
       },
       404
     );
