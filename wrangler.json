@@ -8,6 +8,10 @@
     {
       "binding": "VEGETABLES",
       "service": "vegetablewallbreaker2"
+    },
+    {
+      "binding": "PV7",
+      "service": "projectvegetables7"
     }
   ]
 }
